@@ -21,7 +21,18 @@ class InteractionFunction(Protocol):
     Defines the structure of interaction functions used with PlaywrightTarget.
     """
 
-    async def __call__(self, page: "Page", message: Message) -> str: ...
+    async def __call__(self, page: "Page", message: Message) -> str:
+        """
+        Execute the interaction function with the given page and message.
+
+        Args:
+            page (Page): The Playwright page object.
+            message (Message): The message object containing the prompt.
+
+        Returns:
+            str: The response text from the interaction.
+        """
+        ...
 
 
 class PlaywrightTarget(PromptTarget):
@@ -63,7 +74,19 @@ class PlaywrightTarget(PromptTarget):
         self._page = page
 
     @limit_requests_per_minute
-    async def send_prompt_async(self, *, message: Message) -> Message:
+    async def send_prompt_async(self, *, message: Message) -> list[Message]:
+        """
+        Asynchronously send a message to the Playwright target.
+
+        Args:
+            message (Message): The message object containing the prompt to send.
+
+        Returns:
+            list[Message]: A list containing the response from the prompt target.
+
+        Raises:
+            RuntimeError: If the Playwright page is not initialized or if an error occurs during interaction.
+        """
         self._validate_request(message=message)
         if not self._page:
             raise RuntimeError(
@@ -79,7 +102,7 @@ class PlaywrightTarget(PromptTarget):
         # but the interaction function can process all pieces.
         request_piece = message.message_pieces[0]
         response_entry = construct_response_from_request(request=request_piece, response_text_pieces=[text])
-        return response_entry
+        return [response_entry]
 
     def _validate_request(self, *, message: Message) -> None:
         if not message.message_pieces:

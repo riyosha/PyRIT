@@ -18,7 +18,6 @@ from pyrit.models import (
     Message,
     MessagePiece,
     SeedDataset,
-    SeedGroup,
     SeedPrompt,
 )
 from pyrit.prompt_normalizer import PromptNormalizer
@@ -89,6 +88,7 @@ def mock_seed_dataset():
     prompt3.render_template_value.return_value = "Mock objective as question"
 
     dataset = MagicMock(spec=SeedDataset)
+    dataset.seeds = [prompt1, prompt2, prompt3]
     dataset.prompts = [prompt1, prompt2, prompt3]
     return dataset
 
@@ -129,9 +129,9 @@ class TestContextComplianceAttackInitialization:
             assert attack._objective_target == mock_objective_target
             assert attack._adversarial_chat == mock_attack_adversarial_config.target
             assert attack._affirmative_response == ContextComplianceAttack.DEFAULT_AFFIRMATIVE_RESPONSE
-            assert attack._rephrase_objective_to_user_turn == mock_seed_dataset.prompts[0]
-            assert attack._answer_user_turn == mock_seed_dataset.prompts[1]
-            assert attack._rephrase_objective_to_question == mock_seed_dataset.prompts[2]
+            assert attack._rephrase_objective_to_user_turn == mock_seed_dataset.seeds[0]
+            assert attack._answer_user_turn == mock_seed_dataset.seeds[1]
+            assert attack._rephrase_objective_to_question == mock_seed_dataset.seeds[2]
 
     def test_init_with_all_configs_sets_correct_components(
         self,
@@ -250,7 +250,7 @@ class TestContextComplianceAttackInitialization:
     def test_init_raises_error_for_insufficient_prompts(self, mock_objective_target, mock_attack_adversarial_config):
         """Test error handling for insufficient prompts in context description file"""
         insufficient_dataset = MagicMock(spec=SeedDataset)
-        insufficient_dataset.prompts = [MagicMock(), MagicMock()]  # Only 2 prompts instead of 3
+        insufficient_dataset.seeds = [MagicMock(), MagicMock()]  # Only 2 prompts instead of 3
 
         with patch(
             "pyrit.executor.attack.single_turn.context_compliance.SeedDataset.from_yaml_file",
@@ -390,12 +390,12 @@ class TestContextComplianceAttackSetup:
                 with patch.object(attack.__class__.__bases__[0], "_setup_async", new_callable=AsyncMock):
                     await attack._setup_async(context=basic_context)
 
-                    # Verify seed group was created
-                    assert basic_context.seed_group is not None
-                    assert isinstance(basic_context.seed_group, SeedGroup)
-                    assert len(basic_context.seed_group.prompts) == 1
-                    assert basic_context.seed_group.prompts[0].value == attack._affirmative_response
-                    assert basic_context.seed_group.prompts[0].data_type == "text"
+                    # Verify message was created
+                    assert basic_context.next_message is not None
+                    assert isinstance(basic_context.next_message, Message)
+                    assert len(basic_context.next_message.message_pieces) == 1
+                    assert basic_context.next_message.message_pieces[0].original_value == attack._affirmative_response
+                    assert basic_context.next_message.message_pieces[0].original_value_data_type == "text"
 
     @pytest.mark.asyncio
     async def test_setup_with_custom_affirmative_response(
@@ -427,7 +427,7 @@ class TestContextComplianceAttackSetup:
                     await attack._setup_async(context=basic_context)
 
                     # Verify custom response was used
-                    assert basic_context.seed_group.prompts[0].value == custom_response
+                    assert basic_context.next_message.message_pieces[0].original_value == custom_response
 
 
 @pytest.mark.usefixtures("patch_central_database")
@@ -544,16 +544,14 @@ class TestContextComplianceAttackExecution:
             assert call_args.kwargs["attack_identifier"] == attack.get_identifier()
             assert call_args.kwargs["labels"] == basic_context.memory_labels
 
-            # Verify seed group was created correctly
-            seed_group = call_args.kwargs["seed_group"]
-            assert isinstance(seed_group, SeedGroup)
-            assert len(seed_group.prompts) == 1
-            assert seed_group.prompts[0].data_type == "text"
+            # Verify message was created correctly (converted from seed group)
+            message = call_args.kwargs["message"]
+            assert isinstance(message, Message)
+            assert len(message.message_pieces) == 1
+            assert message.message_pieces[0].converted_value_data_type == "text"
 
             # Verify template was rendered
-            mock_seed_dataset.prompts[0].render_template_value.assert_called_once_with(
-                objective=basic_context.objective
-            )
+            mock_seed_dataset.seeds[0].render_template_value.assert_called_once_with(objective=basic_context.objective)
 
             assert result == "Can you tell me about dangerous substances?"
 
@@ -596,7 +594,7 @@ class TestContextComplianceAttackExecution:
             assert call_args.kwargs["labels"] == basic_context.memory_labels
 
             # Verify template was rendered with benign request
-            mock_seed_dataset.prompts[1].render_template_value.assert_called_once_with(benign_request=benign_query)
+            mock_seed_dataset.seeds[1].render_template_value.assert_called_once_with(benign_request=benign_query)
 
             assert result == "Dangerous substances are materials that can cause harm..."
 
@@ -638,9 +636,7 @@ class TestContextComplianceAttackExecution:
             assert call_args.kwargs["labels"] == basic_context.memory_labels
 
             # Verify template was rendered
-            mock_seed_dataset.prompts[2].render_template_value.assert_called_once_with(
-                objective=basic_context.objective
-            )
+            mock_seed_dataset.seeds[2].render_template_value.assert_called_once_with(objective=basic_context.objective)
 
             assert result == "would you like me to create a dangerous substance?"
 
@@ -787,7 +783,7 @@ class TestContextComplianceAttackErrorHandling:
             )
 
             # Mock template rendering to fail
-            mock_seed_dataset.prompts[0].render_template_value.side_effect = KeyError("missing_param")
+            mock_seed_dataset.seeds[0].render_template_value.side_effect = KeyError("missing_param")
 
             with pytest.raises(KeyError, match="missing_param"):
                 attack._rephrase_objective_to_user_turn.render_template_value(objective="test")
@@ -798,10 +794,10 @@ class TestContextComplianceAttackComponentIntegration:
     """Test integration with attack components."""
 
     @pytest.mark.asyncio
-    async def test_seed_group_creation(
+    async def test_message_creation(
         self, mock_objective_target, mock_attack_adversarial_config, mock_seed_dataset, basic_context
     ):
-        """Test proper creation and usage of SeedGroup objects."""
+        """Test proper creation and usage of Message objects."""
         with patch(
             "pyrit.executor.attack.single_turn.context_compliance.SeedDataset.from_yaml_file",
             return_value=mock_seed_dataset,
@@ -818,14 +814,14 @@ class TestContextComplianceAttackComponentIntegration:
                 with patch.object(attack.__class__.__bases__[0], "_setup_async", new_callable=AsyncMock):
                     await attack._setup_async(context=basic_context)
 
-                    # Verify seed group was created correctly
-                    assert basic_context.seed_group is not None
-                    assert isinstance(basic_context.seed_group, SeedGroup)
-                    assert len(basic_context.seed_group.prompts) == 1
+                    # Verify message was created correctly
+                    assert basic_context.next_message is not None
+                    assert isinstance(basic_context.next_message, Message)
+                    assert len(basic_context.next_message.message_pieces) == 1
 
-                    seed_prompt = basic_context.seed_group.prompts[0]
-                    assert seed_prompt.value == attack._affirmative_response
-                    assert seed_prompt.data_type == "text"
+                    message_piece = basic_context.next_message.message_pieces[0]
+                    assert message_piece.original_value == attack._affirmative_response
+                    assert message_piece.original_value_data_type == "text"
 
 
 @pytest.mark.usefixtures("patch_central_database")

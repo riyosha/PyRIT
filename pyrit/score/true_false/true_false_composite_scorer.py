@@ -34,6 +34,10 @@ class TrueFalseCompositeScorer(TrueFalseScorer):
                 (e.g., ``TrueFalseScoreAggregator.AND``, ``TrueFalseScoreAggregator.OR``,
                 ``TrueFalseScoreAggregator.MAJORITY``).
             scorers (List[TrueFalseScorer]): The constituent true/false scorers to invoke.
+
+        Raises:
+            ValueError: If no scorers are provided.
+            ValueError: If any provided scorer is not a TrueFalseScorer.
         """
         # Initialize base with the selected aggregator used by TrueFalseScorer logic
         # Validation is used by sub-scorers
@@ -48,6 +52,13 @@ class TrueFalseCompositeScorer(TrueFalseScorer):
 
         self._scorers = scorers
 
+    def _build_scorer_identifier(self) -> None:
+        """Build the scorer evaluation identifier for this scorer."""
+        self._set_scorer_identifier(
+            sub_scorers=self._scorers,
+            score_aggregator=self._score_aggregator.__name__,
+        )
+
     async def _score_async(
         self,
         message: Message,
@@ -61,9 +72,14 @@ class TrueFalseCompositeScorer(TrueFalseScorer):
         Args:
             message (Message): The request/response to score.
             objective (Optional[str]): Scoring objective or context.
+            role_filter (Optional[ChatMessageRole]): Optional filter for message roles. Defaults to None.
 
         Returns:
             list[Score]: A single-element list with the aggregated true/false score.
+
+        Raises:
+            ValueError: If any constituent scorer does not return exactly one score.
+            ValueError: If no scores are generated from the request response pieces.
         """
         tasks = [
             scorer.score_async(message=message, objective=objective, role_filter=role_filter)
@@ -115,12 +131,3 @@ class TrueFalseCompositeScorer(TrueFalseScorer):
             NotImplementedError: Always, since composite scoring operates at the response level.
         """
         raise NotImplementedError("TrueFalseCompositeScorer does not support piecewise scoring.")
-
-    def _get_sub_identifier(self):
-        """
-        Returns the identifiers of all constituent scorers.
-
-        Returns:
-            list[dict]: A list of identifier dictionaries from all wrapped scorers.
-        """
-        return [scorer.get_identifier() for scorer in self._scorers]

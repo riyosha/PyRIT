@@ -134,10 +134,11 @@ def test_add_score_duplicate_prompt(sqlite_instance: MemoryInterface):
             attack_identifier=attack.get_identifier(),
         )
     ]
-    new_attack_id = str(uuid4())
     sqlite_instance.add_message_pieces_to_memory(message_pieces=pieces)
-    sqlite_instance.duplicate_conversation(new_attack_id=new_attack_id, conversation_id=conversation_id)
-    dupe_piece = sqlite_instance.get_message_pieces(attack_id=new_attack_id)[0]
+    sqlite_instance.duplicate_conversation(conversation_id=conversation_id)
+    # Get the duplicated piece (it will have a different conversation_id but same attack_id)
+    all_pieces = sqlite_instance.get_message_pieces()
+    dupe_piece = [p for p in all_pieces if p.id != original_id][0]
     dupe_id = dupe_piece.id
     assert dupe_id is not None, "Dupe ID should not be None"
 
@@ -207,7 +208,7 @@ async def test_get_seeds_no_filters(sqlite_instance: MemoryInterface):
         SeedPrompt(value="prompt1", dataset_name="dataset1", data_type="text"),
         SeedPrompt(value="prompt2", dataset_name="dataset2", data_type="text"),
     ]
-    await sqlite_instance.add_seeds_to_memory_async(prompts=seed_prompts, added_by="test")
+    await sqlite_instance.add_seeds_to_memory_async(seeds=seed_prompts, added_by="test")
 
     result = sqlite_instance.get_seeds()
     assert len(result) == 2

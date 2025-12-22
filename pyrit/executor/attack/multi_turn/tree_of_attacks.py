@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, cast, overload
 from treelib.tree import Tree
 
 from pyrit.common.apply_defaults import REQUIRED_VALUE, apply_defaults
-from pyrit.common.path import DATASETS_PATH
+from pyrit.common.path import EXECUTOR_SEED_PROMPT_PATH
 from pyrit.common.utils import combine_dict, warn_if_set
 from pyrit.exceptions import (
     InvalidJsonException,
@@ -21,11 +21,11 @@ from pyrit.exceptions import (
 )
 from pyrit.executor.attack.core import (
     AttackAdversarialConfig,
-    AttackContext,
     AttackConverterConfig,
     AttackScoringConfig,
     AttackStrategy,
 )
+from pyrit.executor.attack.multi_turn import MultiTurnAttackContext
 from pyrit.memory import CentralMemory
 from pyrit.models import (
     AttackOutcome,
@@ -35,7 +35,6 @@ from pyrit.models import (
     Message,
     MessagePiece,
     Score,
-    SeedGroup,
     SeedPrompt,
 )
 from pyrit.prompt_normalizer import PromptConverterConfiguration, PromptNormalizer
@@ -51,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TAPAttackContext(AttackContext):
+class TAPAttackContext(MultiTurnAttackContext):
     """
     Context for the Tree of Attacks with Pruning (TAP) attack strategy.
 
@@ -262,11 +261,6 @@ class _TreeOfAttacksNode:
             objective (str): The attack objective describing what the attacker wants to achieve.
                             This is used to guide the adversarial prompt generation and scoring.
 
-        Returns:
-            None: The method updates the node's internal state instead of returning values.
-                Check node attributes like completed, off_topic, objective_score, and
-                error_message to determine the execution outcome.
-
         Note:
             This method sets the following node attributes during execution:
             - `last_prompt_sent`: The generated adversarial prompt
@@ -402,12 +396,12 @@ class _TreeOfAttacksNode:
         Side Effects:
             - Sets self.last_response to the target's response text
         """
-        # Create seed group from the generated prompt
-        seed_group = SeedGroup(prompts=[SeedPrompt(value=prompt, data_type="text")])
+        # Create message from the generated prompt
+        message = Message.from_prompt(prompt=prompt, role="user")
 
         # Send prompt with configured converters
         response = await self._prompt_normalizer.send_prompt_async(
-            seed_group=seed_group,
+            message=message,
             request_converter_configurations=self._request_converters,
             response_converter_configurations=self._response_converters,
             conversation_id=self.objective_target_conversation_id,
@@ -441,9 +435,6 @@ class _TreeOfAttacksNode:
                 This contains the target's reply to the adversarial prompt.
             objective (str): The attack objective describing what the attacker wants to achieve.
                 This is passed to scorers as context for evaluation.
-
-        Returns:
-            None: The method updates the node's internal scoring state instead of returning values.
 
         Side Effects:
             - Sets self.objective_score to the primary scorer's result (if available)
@@ -790,12 +781,12 @@ class _TreeOfAttacksNode:
                 attack prompt.
         """
         # Configure for JSON response
-        prompt_metadata: dict[str, str | int] = {"response_format": "json"}
-        seed_group = SeedGroup(prompts=[SeedPrompt(value=prompt_text, data_type="text", metadata=prompt_metadata)])
+        message = Message.from_prompt(prompt=prompt_text, role="user")
+        message.message_pieces[0].prompt_metadata = {"response_format": "json"}
 
         # Send and get response
         response = await self._prompt_normalizer.send_prompt_async(
-            seed_group=seed_group,
+            message=message,
             conversation_id=self.adversarial_chat_conversation_id,
             target=self._adversarial_chat,
             labels=self._memory_labels,
@@ -846,7 +837,13 @@ class _TreeOfAttacksNode:
             raise InvalidJsonException(message="The response from the red teaming chat does not contain a prompt.")
 
     def __str__(self) -> str:
-        """String representation of the node showing key execution results."""
+        """
+        Return string representation of the node showing key execution results.
+
+        Returns:
+            str: A string summarizing the node's completion status, objective score,
+                 node ID, and conversation ID.
+        """
         return (
             "TreeOfAttackNode("
             f"completed={self.completed}, "
@@ -860,7 +857,7 @@ class _TreeOfAttacksNode:
 
 class TreeOfAttacksWithPruningAttack(AttackStrategy[TAPAttackContext, TAPAttackResult]):
     """
-    Implementation of the Tree of Attacks with Pruning (TAP) attack strategy.
+    Implement the Tree of Attacks with Pruning (TAP) attack strategy.
 
     The TAP attack strategy systematically explores multiple adversarial prompt paths in parallel
     using a tree structure. It employs breadth-first search with pruning to efficiently find
@@ -914,19 +911,22 @@ class TreeOfAttacksWithPruningAttack(AttackStrategy[TAPAttackContext, TAPAttackR
     References:
         Tree of Attacks: Jailbreaking Black-Box LLMs Automatically
         https://arxiv.org/abs/2312.02119
+
+    Returns:
+        AttackResult: The result of the TAP attack execution.
     """
 
     # Default paths for TAP attack prompts
     DEFAULT_ADVERSARIAL_SYSTEM_PROMPT_PATH: Path = (
-        DATASETS_PATH / "executors" / "tree_of_attacks" / "adversarial_system_prompt.yaml"
+        EXECUTOR_SEED_PROMPT_PATH / "tree_of_attacks" / "adversarial_system_prompt.yaml"
     )
 
     DEFAULT_ADVERSARIAL_PROMPT_TEMPLATE_PATH: Path = (
-        DATASETS_PATH / "executors" / "tree_of_attacks" / "adversarial_prompt_template.yaml"
+        EXECUTOR_SEED_PROMPT_PATH / "tree_of_attacks" / "adversarial_prompt_template.yaml"
     )
 
     DEFAULT_ADVERSARIAL_SEED_PROMPT_PATH: Path = (
-        DATASETS_PATH / "executors" / "tree_of_attacks" / "adversarial_seed_prompt.yaml"
+        EXECUTOR_SEED_PROMPT_PATH / "tree_of_attacks" / "adversarial_seed_prompt.yaml"
     )
 
     @apply_defaults
@@ -1093,7 +1093,7 @@ class TreeOfAttacksWithPruningAttack(AttackStrategy[TAPAttackContext, TAPAttackR
 
     async def _setup_async(self, *, context: TAPAttackContext) -> None:
         """
-        Setup phase before executing the attack.
+        Set up the phase before executing the attack.
 
         Initializes the attack state by preparing the tree visualization structure,
         combining memory labels, and resetting execution tracking variables. This
@@ -1656,7 +1656,7 @@ class TreeOfAttacksWithPruningAttack(AttackStrategy[TAPAttackContext, TAPAttackR
         outcome_reason: str,
     ) -> TAPAttackResult:
         """
-        Helper method to create `TAPAttackResult` with common counting logic and metadata.
+        Create `TAPAttackResult` with common counting logic and metadata.
 
         Consolidates the result construction logic used by both success and failure cases.
         Extracts the last response from the best conversation, compiles auxiliary scores
@@ -1781,19 +1781,7 @@ class TreeOfAttacksWithPruningAttack(AttackStrategy[TAPAttackContext, TAPAttackR
         objective: str,
         memory_labels: Optional[dict[str, str]] = None,
         **kwargs,
-    ) -> TAPAttackResult:
-        """
-        Execute the multi-turn attack strategy asynchronously with the provided parameters.
-
-        Args:
-            objective (str): The objective of the attack.
-            memory_labels (Optional[Dict[str, str]]): Memory labels for the attack context.
-            **kwargs: Additional parameters for the attack.
-
-        Returns:
-            TAPAttackResult: The result of the attack execution.
-        """
-        ...
+    ) -> TAPAttackResult: ...
 
     @overload
     async def execute_async(
@@ -1806,7 +1794,15 @@ class TreeOfAttacksWithPruningAttack(AttackStrategy[TAPAttackContext, TAPAttackR
         **kwargs,
     ) -> TAPAttackResult:
         """
-        Execute the attack strategy asynchronously with the provided parameters.
+        Execute the multi-turn attack strategy asynchronously with the provided parameters.
+
+        Args:
+            objective (str): The objective of the attack.
+            memory_labels (Optional[Dict[str, str]]): Memory labels for the attack context.
+            **kwargs: Additional parameters for the attack.
+
+        Returns:
+            TAPAttackResult: The result of the attack execution.
         """
         return await super().execute_async(**kwargs)
 

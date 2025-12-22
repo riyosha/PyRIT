@@ -52,11 +52,16 @@ class MultiTurnAttackContext(AttackContext):
     # Score assigned to the latest response by a scorer component
     last_score: Optional[Score] = None
 
-    # Optional custom prompt that overrides the default one for the next turn
-    custom_prompt: Optional[str] = None
+    # Optional message that overrides the default prompt for the next turn
+    next_message: Optional[Message] = None
 
 
 class MultiTurnAttackStrategy(AttackStrategy[MultiTurnAttackStrategyContextT, AttackStrategyResultT], ABC):
+    """
+    Strategy for executing multi-turn attacks.
+    This strategy is designed to handle attacks that consist of multiple turns
+    of interaction with the target model.
+    """
 
     def __init__(
         self,
@@ -66,7 +71,7 @@ class MultiTurnAttackStrategy(AttackStrategy[MultiTurnAttackStrategyContextT, At
         logger: logging.Logger = logger,
     ):
         """
-        The base class for multi-turn attack strategies.
+        Implement the base class for multi-turn attack strategies.
 
         Args:
             objective_target (PromptTarget): The target system to attack.
@@ -81,24 +86,10 @@ class MultiTurnAttackStrategy(AttackStrategy[MultiTurnAttackStrategyContextT, At
         *,
         objective: str,
         prepended_conversation: Optional[List[Message]] = None,
-        custom_prompt: Optional[str] = None,
+        next_message: Optional[Message] = None,
         memory_labels: Optional[dict[str, str]] = None,
         **kwargs,
-    ) -> AttackStrategyResultT:
-        """
-        Execute the multi-turn attack strategy asynchronously with the provided parameters.
-
-        Args:
-            objective (str): The objective of the attack.
-            prepended_conversation (Optional[List[Message]]): Conversation to prepend.
-            custom_prompt (Optional[str]): Custom prompt for the attack.
-            memory_labels (Optional[Dict[str, str]]): Memory labels for the attack context.
-            **kwargs: Additional parameters for the attack.
-
-        Returns:
-            AttackStrategyResultT: The result of the attack execution.
-        """
-        ...
+    ) -> AttackStrategyResultT: ...
 
     @overload
     async def execute_async(
@@ -111,9 +102,19 @@ class MultiTurnAttackStrategy(AttackStrategy[MultiTurnAttackStrategyContextT, At
         **kwargs,
     ) -> AttackStrategyResultT:
         """
-        Execute the attack strategy asynchronously with the provided parameters.
+        Execute the multi-turn attack strategy asynchronously with the provided parameters.
+
+        Args:
+            objective (str): The objective of the attack.
+            prepended_conversation (Optional[List[Message]]): Conversation to prepend.
+            next_message (Optional[Message]): Optional message to send to the objective target.
+            memory_labels (Optional[Dict[str, str]]): Memory labels for the attack context.
+            **kwargs: Additional parameters for the attack.
+
+        Returns:
+            AttackStrategyResultT: The result of the attack execution.
         """
         # Validate parameters before creating context
-        custom_prompt = get_kwarg_param(kwargs=kwargs, param_name="custom_prompt", expected_type=str, required=False)
+        next_message = get_kwarg_param(kwargs=kwargs, param_name="next_message", expected_type=Message, required=False)
 
-        return await super().execute_async(**kwargs, custom_prompt=custom_prompt)
+        return await super().execute_async(**kwargs, next_message=next_message)

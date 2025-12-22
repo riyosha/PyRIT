@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from pyrit.common.apply_defaults import REQUIRED_VALUE, apply_defaults
-from pyrit.common.path import DATASETS_PATH
+from pyrit.common.path import EXECUTOR_SEED_PROMPT_PATH
 from pyrit.executor.attack.core import (
     AttackAdversarialConfig,
     AttackConverterConfig,
@@ -20,8 +20,6 @@ from pyrit.models import (
     Message,
     MessagePiece,
     SeedDataset,
-    SeedGroup,
-    SeedPrompt,
 )
 from pyrit.prompt_normalizer import PromptNormalizer
 from pyrit.prompt_target import PromptChatTarget
@@ -44,7 +42,7 @@ class ContextComplianceAttack(PromptSendingAttack):
 
     # Default path for context description instructions
     DEFAULT_CONTEXT_DESCRIPTION_PATH: Path = (
-        Path(DATASETS_PATH) / "executors" / "context_compliance" / "context_description.yaml"
+        Path(EXECUTOR_SEED_PROMPT_PATH) / "context_compliance" / "context_description.yaml"
     )
 
     # Default affirmative response used in conversation
@@ -171,18 +169,11 @@ class ContextComplianceAttack(PromptSendingAttack):
         # Update context with the prepended conversation
         context.prepended_conversation = prepended_conversation
 
-        # Create the affirmative seed group
-        affirmative_seed_prompt = SeedGroup(
-            prompts=[
-                SeedPrompt(
-                    value=self._affirmative_response,
-                    data_type="text",
-                )
-            ]
+        # Create the affirmative message
+        context.next_message = Message.from_prompt(
+            prompt=self._affirmative_response,
+            role="user",
         )
-
-        # Set the seed group in context
-        context.seed_group = affirmative_seed_prompt
 
         await super()._setup_async(context=context)
 
@@ -247,17 +238,13 @@ class ContextComplianceAttack(PromptSendingAttack):
         Returns:
             str: The objective rephrased as a benign question.
         """
-        seed_group = SeedGroup(
-            prompts=[
-                SeedPrompt(
-                    value=self._rephrase_objective_to_user_turn.render_template_value(objective=objective),
-                    data_type="text",
-                )
-            ]
+        message = Message.from_prompt(
+            prompt=self._rephrase_objective_to_user_turn.render_template_value(objective=objective),
+            role="user",
         )
 
         response = await self._prompt_normalizer.send_prompt_async(
-            seed_group=seed_group,
+            message=message,
             target=self._adversarial_chat,
             attack_identifier=self.get_identifier(),
             labels=context.memory_labels,
@@ -278,17 +265,13 @@ class ContextComplianceAttack(PromptSendingAttack):
         Returns:
             str: The answer to the benign question.
         """
-        seed_group = SeedGroup(
-            prompts=[
-                SeedPrompt(
-                    value=self._answer_user_turn.render_template_value(benign_request=benign_user_query),
-                    data_type="text",
-                )
-            ]
+        message = Message.from_prompt(
+            prompt=self._answer_user_turn.render_template_value(benign_request=benign_user_query),
+            role="user",
         )
 
         response = await self._prompt_normalizer.send_prompt_async(
-            seed_group=seed_group,
+            message=message,
             target=self._adversarial_chat,
             attack_identifier=self.get_identifier(),
             labels=context.memory_labels,
@@ -307,17 +290,13 @@ class ContextComplianceAttack(PromptSendingAttack):
         Returns:
             str: The objective rephrased as a question.
         """
-        seed_group = SeedGroup(
-            prompts=[
-                SeedPrompt(
-                    value=self._rephrase_objective_to_question.render_template_value(objective=objective),
-                    data_type="text",
-                )
-            ]
+        message = Message.from_prompt(
+            prompt=self._rephrase_objective_to_question.render_template_value(objective=objective),
+            role="user",
         )
 
         response = await self._prompt_normalizer.send_prompt_async(
-            seed_group=seed_group,
+            message=message,
             target=self._adversarial_chat,
             attack_identifier=self.get_identifier(),
             labels=context.memory_labels,

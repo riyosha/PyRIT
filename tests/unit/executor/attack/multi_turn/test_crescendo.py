@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pyrit.common.path import DATASETS_PATH
+from pyrit.common.path import EXECUTOR_SEED_PROMPT_PATH
 from pyrit.exceptions import (
     InvalidJsonException,
 )
@@ -336,7 +336,7 @@ class TestCrescendoAttackInitialization:
 
     @pytest.mark.parametrize(
         "system_prompt_path",
-        [Path(DATASETS_PATH) / "executors" / "crescendo" / f"crescendo_variant_{i}.yaml" for i in range(1, 6)],
+        [Path(EXECUTOR_SEED_PROMPT_PATH) / "crescendo" / f"crescendo_variant_{i}.yaml" for i in range(1, 6)],
     )
     def test_init_with_different_system_prompt_variants(
         self,
@@ -636,7 +636,8 @@ class TestSetupPhase:
         with patch.object(attack._conversation_manager, "update_conversation_state_async", return_value=mock_state):
             await attack._setup_async(context=basic_context)
 
-        assert basic_context.custom_prompt == "Custom prepended prompt"
+        assert basic_context.next_message is not None
+        assert basic_context.next_message.get_value() == "Custom prepended prompt"
 
 
 @pytest.mark.usefixtures("patch_central_database")
@@ -658,12 +659,14 @@ class TestPromptGeneration:
             attack_adversarial_config=adversarial_config,
         )
 
-        basic_context.custom_prompt = "Custom prompt"
+        custom_message = Message.from_prompt(prompt="Custom prompt", role="user")
+        basic_context.next_message = custom_message
 
         result = await attack._generate_next_prompt_async(context=basic_context)
 
-        assert result == "Custom prompt"
-        assert basic_context.custom_prompt is None  # Should be cleared
+        assert result is custom_message  # Should return the same Message object
+        assert result.get_value() == "Custom prompt"
+        assert basic_context.next_message is None  # Should be cleared
 
     @pytest.mark.asyncio
     async def test_generate_next_prompt_calls_adversarial_chat(
@@ -695,12 +698,13 @@ class TestPromptGeneration:
         )
         mock_prompt_normalizer.send_prompt_async.return_value = response
 
-        basic_context.custom_prompt = None
+        basic_context.next_message = None
         basic_context.refused_text = "Previous refused text"
 
         result = await attack._generate_next_prompt_async(context=basic_context)
 
-        assert result == "Attack prompt"
+        assert isinstance(result, Message)
+        assert result.get_value() == "Attack prompt"
         mock_prompt_normalizer.send_prompt_async.assert_called_once()
 
     @pytest.mark.asyncio
@@ -830,6 +834,49 @@ class TestPromptGeneration:
             # Should not raise
             result = attack._parse_adversarial_response(response_json)
             assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_custom_message_is_sent_to_target(
+        self,
+        mock_objective_target: MagicMock,
+        mock_adversarial_chat: MagicMock,
+        mock_prompt_normalizer: MagicMock,
+        basic_context: CrescendoAttackContext,
+    ):
+        """Test that when a custom message is passed, it is the exact message sent to the target."""
+        adversarial_config = AttackAdversarialConfig(target=mock_adversarial_chat)
+
+        attack = CrescendoAttack(
+            objective_target=mock_objective_target,
+            attack_adversarial_config=adversarial_config,
+            prompt_normalizer=mock_prompt_normalizer,
+        )
+
+        # Create a custom message
+        custom_message = Message.from_prompt(prompt="My custom attack prompt", role="user")
+
+        # Mock response from target
+        target_response = Message(
+            message_pieces=[
+                MessagePiece(
+                    role="assistant",
+                    original_value="Target response",
+                    converted_value="Target response",
+                )
+            ]
+        )
+        mock_prompt_normalizer.send_prompt_async.return_value = target_response
+
+        # Send the custom message to the target
+        result = await attack._send_prompt_to_objective_target_async(
+            attack_message=custom_message,
+            context=basic_context,
+        )
+
+        # Verify the exact message object was passed to send_prompt_async
+        call_args = mock_prompt_normalizer.send_prompt_async.call_args
+        assert call_args.kwargs["message"] is custom_message
+        assert result is target_response
 
 
 @pytest.mark.usefixtures("patch_central_database")
@@ -1034,10 +1081,166 @@ class TestBacktrackingLogic:
         # Important: Should not even check for refusal to save API calls
         mock_refusal_scorer.score_async.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_backtrack_on_content_filter_error(
+        self,
+        mock_objective_target: MagicMock,
+        mock_adversarial_chat: MagicMock,
+        mock_refusal_scorer: MagicMock,
+        basic_context: CrescendoAttackContext,
+    ):
+        """Test that backtracking is performed when content filter error occurs.
+
+        When the target returns a content filter error (blocked response), Crescendo should:
+        1. Detect the error without calling the refusal scorer
+        2. Store the refused text for the adversarial chat to learn from
+        3. Revert the conversation to before the blocked prompt
+        4. Increment the backtrack counter
+        5. Continue with a new approach
+        """
+        adversarial_config = AttackAdversarialConfig(target=mock_adversarial_chat)
+        scoring_config = AttackScoringConfig(refusal_scorer=mock_refusal_scorer)
+
+        attack = CrescendoAttack(
+            objective_target=mock_objective_target,
+            attack_adversarial_config=adversarial_config,
+            attack_scoring_config=scoring_config,
+        )
+
+        # Create a response with content filter error
+        blocked_response = Message(
+            message_pieces=[
+                MessagePiece(
+                    role="assistant",
+                    original_value="Content filtered",
+                    converted_value="Content filtered",
+                    original_value_data_type="error",
+                    converted_value_data_type="error",
+                    response_error="blocked",
+                )
+            ]
+        )
+
+        basic_context.last_response = blocked_response
+        basic_context.backtrack_count = 0
+
+        # Mock backtrack_memory_async to return a new conversation ID
+        with patch.object(attack, "_backtrack_memory_async", new_callable=AsyncMock, return_value="new_conv_id"):
+            result = await attack._perform_backtrack_if_refused_async(
+                context=basic_context, prompt_sent="Blocked prompt"
+            )
+
+        # Verify all expected state changes occurred
+        assert result is True
+        assert basic_context.refused_text == "Blocked prompt"  # Stored for next attempt
+        assert basic_context.backtrack_count == 1
+        assert basic_context.session.conversation_id == "new_conv_id"  # New conversation branch
+
+        # Critical: Verify refusal scorer was NOT called since we detected the error first
+        mock_refusal_scorer.score_async.assert_not_called()
+
 
 @pytest.mark.usefixtures("patch_central_database")
 class TestAttackExecution:
     """Tests for the main attack execution logic."""
+
+    @pytest.mark.asyncio
+    async def test_perform_attack_with_message_bypasses_adversarial_chat_on_first_turn(
+        self,
+        mock_objective_target: MagicMock,
+        mock_adversarial_chat: MagicMock,
+        mock_prompt_normalizer: MagicMock,
+        basic_context: CrescendoAttackContext,
+        sample_response: Message,
+        success_objective_score: Score,
+        no_refusal_score: Score,
+    ):
+        """Test that providing a message parameter bypasses adversarial chat generation on first turn."""
+        adversarial_config = AttackAdversarialConfig(target=mock_adversarial_chat)
+
+        attack = CrescendoAttack(
+            objective_target=mock_objective_target,
+            attack_adversarial_config=adversarial_config,
+            prompt_normalizer=mock_prompt_normalizer,
+        )
+
+        # Set message to bypass adversarial chat
+        custom_message = Message.from_prompt(prompt="Custom first turn message", role="user")
+        basic_context.next_message = custom_message
+
+        # Mock only objective target response (no adversarial chat should be called)
+        mock_prompt_normalizer.send_prompt_async.return_value = sample_response
+
+        with patch.object(attack, "_check_refusal_async", new_callable=AsyncMock, return_value=no_refusal_score):
+            with patch(
+                "pyrit.score.Scorer.score_response_async",
+                new_callable=AsyncMock,
+                return_value={"objective_scores": [success_objective_score], "auxiliary_scores": []},
+            ):
+                result = await attack._perform_async(context=basic_context)
+
+        assert isinstance(result, CrescendoAttackResult)
+        assert result.outcome == AttackOutcome.SUCCESS
+        assert result.executed_turns == 1
+
+        # Verify adversarial chat was not called for first turn
+        # (only objective target should receive the custom message)
+        assert mock_prompt_normalizer.send_prompt_async.call_count == 1
+
+        # Verify the message was cleared after use
+        assert basic_context.next_message is None
+
+    @pytest.mark.asyncio
+    async def test_perform_attack_with_multi_piece_message_uses_first_piece(
+        self,
+        mock_objective_target: MagicMock,
+        mock_adversarial_chat: MagicMock,
+        mock_prompt_normalizer: MagicMock,
+        basic_context: CrescendoAttackContext,
+        sample_response: Message,
+        success_objective_score: Score,
+        no_refusal_score: Score,
+    ):
+        """Test that multi-piece messages use only the first piece's converted_value."""
+        adversarial_config = AttackAdversarialConfig(target=mock_adversarial_chat)
+
+        attack = CrescendoAttack(
+            objective_target=mock_objective_target,
+            attack_adversarial_config=adversarial_config,
+            prompt_normalizer=mock_prompt_normalizer,
+        )
+
+        # Create multi-piece message (e.g., text + image scenario)
+        piece1 = MessagePiece(
+            role="user",
+            original_value="First piece text",
+            converted_value="First piece text",
+            conversation_id="test-conv",
+            sequence=1,
+        )
+        piece2 = MessagePiece(
+            role="user",
+            original_value="Second piece text",
+            converted_value="Second piece text",
+            conversation_id="test-conv",
+            sequence=1,
+        )
+        multi_piece_message = Message(message_pieces=[piece1, piece2])
+        basic_context.next_message = multi_piece_message
+
+        mock_prompt_normalizer.send_prompt_async.return_value = sample_response
+
+        with patch.object(attack, "_check_refusal_async", new_callable=AsyncMock, return_value=no_refusal_score):
+            with patch(
+                "pyrit.score.Scorer.score_response_async",
+                new_callable=AsyncMock,
+                return_value={"objective_scores": [success_objective_score], "auxiliary_scores": []},
+            ):
+                result = await attack._perform_async(context=basic_context)
+
+        # Verify the attack succeeded using the first piece's value
+        assert result.outcome == AttackOutcome.SUCCESS
+        assert mock_prompt_normalizer.send_prompt_async.call_count == 1
 
     @pytest.mark.asyncio
     async def test_perform_attack_success_on_first_turn(
@@ -1310,16 +1513,17 @@ class TestContextCreation:
         assert context.prepended_conversation == []
         assert context.memory_labels == {"test": "label"}
 
-    def test_create_context_with_custom_prompt(self):
-        """Test creating context with custom prompt."""
+    def test_create_context_with_message(self):
+        """Test creating context with message."""
+        message = Message.from_prompt(prompt="My custom prompt", role="user")
         context = CrescendoAttackContext(
             objective="Test objective",
             prepended_conversation=[],
             memory_labels={},
-            custom_prompt="My custom prompt",
+            next_message=message,
         )
 
-        assert context.custom_prompt == "My custom prompt"
+        assert context.next_message == message
 
     def test_create_context_with_prepended_conversation(
         self,
@@ -1448,10 +1652,11 @@ class TestAttackLifecycle:
         )
 
         with patch.object(attack, "execute_with_context_async", new_callable=AsyncMock, return_value=mock_result):
+            message = Message.from_prompt(prompt="Custom prompt", role="user")
             result = await attack.execute_async(
                 objective="Test objective",
                 memory_labels={"test": "label"},
-                custom_prompt="Custom prompt",
+                next_message=message,
             )
 
         assert isinstance(result, CrescendoAttackResult)

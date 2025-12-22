@@ -16,7 +16,7 @@ from pyrit.executor.attack.multi_turn.multi_turn_attack_strategy import (
 from pyrit.executor.attack.single_turn.single_turn_attack_strategy import (
     SingleTurnAttackContext,
 )
-from pyrit.models import Message, SeedGroup
+from pyrit.models import Message
 
 AttackResultT = TypeVar("AttackResultT")
 
@@ -39,15 +39,30 @@ class AttackExecutorResult(Generic[AttackResultT]):
     incomplete_objectives: List[tuple[str, BaseException]]
 
     def __iter__(self):
-        """Iterate over completed results."""
+        """
+        Iterate over completed results.
+
+        Returns:
+            Iterator[AttackResultT]: An iterator over the completed results.
+        """
         return iter(self.completed_results)
 
     def __len__(self) -> int:
-        """Return number of completed results."""
+        """
+        Return number of completed results.
+
+        Returns:
+            int: The number of completed results.
+        """
         return len(self.completed_results)
 
     def __getitem__(self, index: int) -> AttackResultT:
-        """Access completed results by index."""
+        """
+        Access completed results by index.
+
+        Returns:
+            AttackResultT: The completed result at the specified index.
+        """
         return self.completed_results[index]
 
     @property
@@ -191,7 +206,7 @@ class AttackExecutor:
         *,
         attack: AttackStrategy[_SingleTurnContextT, AttackStrategyResultT],
         objectives: List[str],
-        seed_groups: Optional[List[SeedGroup]] = None,
+        messages: Optional[List[Message]] = None,
         prepended_conversations: Optional[List[List[Message]]] = None,
         memory_labels: Optional[Dict[str, str]] = None,
         return_partial_on_failure: bool = False,
@@ -207,8 +222,8 @@ class AttackExecutor:
             attack (AttackStrategy[_SingleTurnContextT, AttackStrategyResultT]): The single-turn attack strategy to use,
                 the context must be a SingleTurnAttackContext or a subclass of it.
             objectives (List[str]): List of attack objectives to test.
-            seed_groups (Optional[List[SeedGroup]]): List of seed groups to use for this execution.
-                If provided, must match the length of objectives. Seed group will be sent along the objective
+            messages (Optional[List[Message]]): List of messages to use for this execution.
+                If provided, must match the length of objectives. Message will be sent along the objective
                 with the same list index.
             prepended_conversations (Optional[List[List[Message]]]): Conversations to prepend to each
                 objective. If provided, must match the length of objectives. Conversation will be sent along the
@@ -226,13 +241,14 @@ class AttackExecutor:
 
         Raises:
             BaseException: If return_partial_on_failure=False and any objective doesn't complete execution.
+            TypeError: If the attack strategy does not use SingleTurnAttackContext.
 
         Example:
             >>> executor = AttackExecutor(max_concurrency=3)
             >>> results = await executor.execute_single_turn_attacks_async(
             ...     attack=single_turn_attack,
             ...     objectives=["how to make a Molotov cocktail", "how to escalate privileges"],
-            ...     seed_groups=[SeedGroup(...), SeedGroup(...)]
+            ...     messages=[Message(...), Message(...)]
             ... )
         """
         # Validate that the attack uses SingleTurnAttackContext
@@ -244,8 +260,8 @@ class AttackExecutor:
         # Validate input parameters using shared validation logic
         self._validate_attack_batch_parameters(
             objectives=objectives,
-            optional_list=seed_groups,
-            optional_list_name="seed_groups",
+            optional_list=messages,
+            optional_list_name="messages",
             prepended_conversations=prepended_conversations,
         )
 
@@ -254,14 +270,14 @@ class AttackExecutor:
 
         async def execute_with_semaphore(
             objective: str,
-            seed_group: Optional[SeedGroup],
+            message: Optional[Message],
             prepended_conversation: Optional[List[Message]],
         ) -> AttackStrategyResultT:
             async with semaphore:
                 return await attack.execute_async(
                     objective=objective,
                     prepended_conversation=prepended_conversation,
-                    seed_group=seed_group,
+                    next_message=message,
                     memory_labels=memory_labels or {},
                     **attack_params,
                 )
@@ -269,11 +285,11 @@ class AttackExecutor:
         # Create tasks for each objective with its corresponding parameters
         tasks = []
         for i, objective in enumerate(objectives):
-            seed_group = seed_groups[i] if seed_groups else None
+            message = messages[i] if messages else None
             prepended_conversation = prepended_conversations[i] if prepended_conversations else []
 
             task = execute_with_semaphore(
-                objective=objective, seed_group=seed_group, prepended_conversation=prepended_conversation
+                objective=objective, message=message, prepended_conversation=prepended_conversation
             )
             tasks.append(task)
 
@@ -291,7 +307,7 @@ class AttackExecutor:
         *,
         attack: AttackStrategy[_MultiTurnContextT, AttackStrategyResultT],
         objectives: List[str],
-        custom_prompts: Optional[List[str]] = None,
+        messages: Optional[List[Message]] = None,
         prepended_conversations: Optional[List[List[Message]]] = None,
         memory_labels: Optional[Dict[str, str]] = None,
         return_partial_on_failure: bool = False,
@@ -301,14 +317,14 @@ class AttackExecutor:
         Execute a batch of multi-turn attacks with multiple objectives.
 
         This method is specifically designed for multi-turn attacks, allowing you to
-        execute multiple objectives in parallel while managing the contexts and custom prompts.
+        execute multiple objectives in parallel while managing the contexts and messages.
 
         Args:
             attack (AttackStrategy[_MultiTurnContextT, AttackStrategyResultT]): The multi-turn attack strategy to use,
                 the context must be a MultiTurnAttackContext or a subclass of it.
             objectives (List[str]): List of attack objectives to test.
-            custom_prompts (Optional[List[str]]): List of custom prompts to use for this execution.
-                If provided, must match the length of objectives. custom prompts will be sent along the objective
+            messages (Optional[List[Message]]): List of messages to use for this execution.
+                If provided, must match the length of objectives. Messages will be sent along the objective
                 with the same list index.
             prepended_conversations (Optional[List[List[Message]]]): Conversations to prepend to each
                 objective. If provided, must match the length of objectives. Conversation will be sent along the
@@ -326,13 +342,14 @@ class AttackExecutor:
 
         Raises:
             BaseException: If return_partial_on_failure=False and any objective doesn't complete execution.
+            TypeError: If the attack strategy does not use MultiTurnAttackContext.
 
         Example:
             >>> executor = AttackExecutor(max_concurrency=3)
             >>> results = await executor.execute_multi_turn_attacks_async(
             ...     attack=multi_turn_attack,
             ...     objectives=["how to make a Molotov cocktail", "how to escalate privileges"],
-            ...     custom_prompts=["Tell me about chemistry", "Explain system administration"]
+            ...     messages=[Message(...), Message(...)]
             ... )
         """
         # Validate that the attack uses MultiTurnAttackContext
@@ -344,8 +361,8 @@ class AttackExecutor:
         # Validate input parameters using shared validation logic
         self._validate_attack_batch_parameters(
             objectives=objectives,
-            optional_list=custom_prompts,
-            optional_list_name="custom_prompts",
+            optional_list=messages,
+            optional_list_name="messages",
             prepended_conversations=prepended_conversations,
         )
 
@@ -353,13 +370,13 @@ class AttackExecutor:
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
         async def execute_with_semaphore(
-            objective: str, custom_prompt: Optional[str], prepended_conversation: Optional[List[Message]]
+            objective: str, message: Optional[Message], prepended_conversation: Optional[List[Message]]
         ) -> AttackStrategyResultT:
             async with semaphore:
                 return await attack.execute_async(
                     objective=objective,
                     prepended_conversation=prepended_conversation,
-                    custom_prompt=custom_prompt,
+                    next_message=message,
                     memory_labels=memory_labels or {},
                     **attack_params,
                 )
@@ -367,11 +384,11 @@ class AttackExecutor:
         # Create tasks for each objective with its corresponding parameters
         tasks = []
         for i, objective in enumerate(objectives):
-            custom_prompt = custom_prompts[i] if custom_prompts else None
+            message = messages[i] if messages else None
             prepended_conversation = prepended_conversations[i] if prepended_conversations else []
 
             task = execute_with_semaphore(
-                objective=objective, custom_prompt=custom_prompt, prepended_conversation=prepended_conversation
+                objective=objective, message=message, prepended_conversation=prepended_conversation
             )
             tasks.append(task)
 

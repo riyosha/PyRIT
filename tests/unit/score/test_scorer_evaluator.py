@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pyrit.common.path import SCORER_EVALS_HARM_PATH, SCORER_EVALS_OBJECTIVE_PATH
+from pyrit.common.path import SCORER_EVALS_HARM_PATH, SCORER_EVALS_TRUE_FALSE_PATH
 from pyrit.models import Message, MessagePiece
 from pyrit.score import (
     FloatScaleScorer,
@@ -28,12 +28,12 @@ from pyrit.score import (
 
 @pytest.fixture
 def sample_harm_csv_path():
-    return f"{str(SCORER_EVALS_HARM_PATH)}/SAMPLE_hate_speech.csv"
+    return f"{str(SCORER_EVALS_HARM_PATH)}/mini_hate_speech.csv"
 
 
 @pytest.fixture
 def sample_objective_csv_path():
-    return f"{str(SCORER_EVALS_OBJECTIVE_PATH)}/evaluation_datasets_09_22_2025/SAMPLE_mixed_objective_refusal.csv"
+    return f"{str(SCORER_EVALS_TRUE_FALSE_PATH)}/mini_refusal.csv"
 
 
 @pytest.fixture
@@ -276,7 +276,7 @@ async def test_run_evaluation_from_csv_async_objective(mock_run_eval, sample_obj
     result = await evaluator.run_evaluation_from_csv_async(
         csv_path=sample_objective_csv_path,
         assistant_response_col_name="assistant_response",
-        human_label_col_names=["human_score"],
+        human_label_col_names=["normalized_score"],
         objective_or_harm_col_name="objective",
         assistant_response_data_type_col_name="data_type",
         num_scorer_trials=2,
@@ -404,8 +404,8 @@ def test_get_metrics_path_and_csv_path_harm(mock_harm_scorer):
 def test_get_metrics_path_and_csv_path_objective(mock_objective_scorer):
     evaluator = ObjectiveScorerEvaluator(mock_objective_scorer)
     dataset_name = "SAMPLE_objective"
-    expected_metrics_path = Path(SCORER_EVALS_OBJECTIVE_PATH) / f"{dataset_name}_MagicMock_metrics.json"
-    expected_csv_path = Path(SCORER_EVALS_OBJECTIVE_PATH) / f"{dataset_name}_MagicMock_scoring_results.csv"
+    expected_metrics_path = Path(SCORER_EVALS_TRUE_FALSE_PATH) / f"{dataset_name}_MagicMock_metrics.json"
+    expected_csv_path = Path(SCORER_EVALS_TRUE_FALSE_PATH) / f"{dataset_name}_MagicMock_scoring_results.csv"
     metrics_path = evaluator._get_metrics_path(dataset_name)
     csv_path = evaluator._get_csv_results_path(dataset_name)
     assert metrics_path == expected_metrics_path
@@ -419,7 +419,9 @@ async def test_run_evaluation_async_harm(mock_harm_scorer):
     ]
     entry1 = HarmHumanLabeledEntry(responses, [0.1, 0.3], "hate_speech")
     entry2 = HarmHumanLabeledEntry(responses, [0.2, 0.6], "hate_speech")
-    mock_dataset = HumanLabeledDataset(name="test_dataset", metrics_type=MetricsType.HARM, entries=[entry1, entry2])
+    mock_dataset = HumanLabeledDataset(
+        name="test_dataset", metrics_type=MetricsType.HARM, entries=[entry1, entry2], version="1.0"
+    )
     # Patch scorer to return fixed scores
     entry_values = [MagicMock(get_value=lambda: 0.2), MagicMock(get_value=lambda: 0.4)]
     mock_harm_scorer.score_prompts_batch_async = AsyncMock(return_value=entry_values)
@@ -439,7 +441,9 @@ async def test_run_evaluation_async_objective(mock_objective_scorer):
         Message(message_pieces=[MessagePiece(role="assistant", original_value="test", original_value_data_type="text")])
     ]
     entry = ObjectiveHumanLabeledEntry(responses, [True], "Test objective")
-    mock_dataset = HumanLabeledDataset(name="test_dataset", metrics_type=MetricsType.OBJECTIVE, entries=[entry])
+    mock_dataset = HumanLabeledDataset(
+        name="test_dataset", metrics_type=MetricsType.OBJECTIVE, entries=[entry], version="1.0"
+    )
     # Patch scorer to return fixed scores
     mock_objective_scorer.score_prompts_with_tasks_batch_async = AsyncMock(
         return_value=[MagicMock(get_value=lambda: False)]

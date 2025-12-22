@@ -45,8 +45,16 @@ class PromptShieldScorer(TrueFalseScorer):
             score_aggregator (TrueFalseAggregatorFunc): The aggregator function to use.
                 Defaults to TrueFalseScoreAggregator.OR.
         """
-        super().__init__(validator=validator or self._default_validator, score_aggregator=score_aggregator)
         self._prompt_target = prompt_shield_target
+
+        super().__init__(validator=validator or self._default_validator, score_aggregator=score_aggregator)
+
+    def _build_scorer_identifier(self) -> None:
+        """Build the scorer evaluation identifier for this scorer."""
+        self._set_scorer_identifier(
+            prompt_target=self._prompt_target,
+            score_aggregator=self._score_aggregator.__name__,
+        )
 
     async def _score_piece_async(self, message_piece: MessagePiece, *, objective: Optional[str] = None) -> list[Score]:
         self._conversation_id = str(uuid.uuid4())
@@ -67,7 +75,7 @@ class PromptShieldScorer(TrueFalseScorer):
 
         # The body of the Prompt Shield response
         target_response = await self._prompt_target.send_prompt_async(message=request)
-        response: str = target_response.get_value()
+        response: str = target_response[0].get_value()
 
         # Whether or not any of the documents or userPrompt got flagged as an attack
         result: bool = any(self._parse_response_to_boolean_list(response))
@@ -96,6 +104,9 @@ class PromptShieldScorer(TrueFalseScorer):
         """
         Remember that you can just access the metadata attribute to get the original Prompt Shield endpoint response,
         and then just call json.loads() on it to interact with it.
+
+        Returns:
+            list[bool]: A list of boolean values indicating whether an attack was detected.
         """
         response_json: dict = json.loads(response)
 

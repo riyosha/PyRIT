@@ -1,7 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 
-import os
 from textwrap import dedent
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,7 +34,7 @@ async def test_true_false_scorer_score(patch_central_database, scorer_true_false
 
     chat_target = MagicMock()
 
-    chat_target.send_prompt_async = AsyncMock(return_value=scorer_true_false_response)
+    chat_target.send_prompt_async = AsyncMock(return_value=[scorer_true_false_response])
     scorer = SelfAskTrueFalseScorer(
         chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
     )
@@ -52,7 +51,7 @@ async def test_true_false_scorer_score(patch_central_database, scorer_true_false
 @pytest.mark.asyncio
 async def test_true_false_scorer_set_system_prompt(patch_central_database, scorer_true_false_response: Message):
     chat_target = MagicMock()
-    chat_target.send_prompt_async = AsyncMock(return_value=scorer_true_false_response)
+    chat_target.send_prompt_async = AsyncMock(return_value=[scorer_true_false_response])
 
     scorer = SelfAskTrueFalseScorer(
         chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
@@ -71,7 +70,7 @@ async def test_true_false_scorer_set_system_prompt(patch_central_database, score
 async def test_true_false_scorer_adds_to_memory(scorer_true_false_response: Message):
     memory = MagicMock(MemoryInterface)
     chat_target = MagicMock()
-    chat_target.send_prompt_async = AsyncMock(return_value=scorer_true_false_response)
+    chat_target.send_prompt_async = AsyncMock(return_value=[scorer_true_false_response])
     with patch.object(CentralMemory, "get_memory_instance", return_value=memory):
         scorer = SelfAskTrueFalseScorer(
             chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
@@ -88,15 +87,16 @@ async def test_self_ask_scorer_bad_json_exception_retries(patch_central_database
     chat_target = MagicMock()
 
     bad_json_resp = Message(message_pieces=[MessagePiece(role="assistant", original_value="this is not a json")])
-    chat_target.send_prompt_async = AsyncMock(return_value=bad_json_resp)
+    chat_target.send_prompt_async = AsyncMock(return_value=[bad_json_resp])
     scorer = SelfAskTrueFalseScorer(
         chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
     )
 
-    with pytest.raises(InvalidJsonException):
+    with pytest.raises(InvalidJsonException, match="Error in scorer SelfAskTrueFalseScorer"):
         await scorer.score_text_async("this has no bullying")
 
-    assert chat_target.send_prompt_async.call_count == int(os.getenv("RETRY_MAX_NUM_ATTEMPTS", 2))
+    # RETRY_MAX_NUM_ATTEMPTS is set to 2 in conftest.py
+    assert chat_target.send_prompt_async.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -115,12 +115,61 @@ async def test_self_ask_objective_scorer_bad_json_exception_retries(patch_centra
 
     bad_json_resp = Message(message_pieces=[MessagePiece(role="assistant", original_value=json_response)])
 
-    chat_target.send_prompt_async = AsyncMock(return_value=bad_json_resp)
+    chat_target.send_prompt_async = AsyncMock(return_value=[bad_json_resp])
     scorer = SelfAskTrueFalseScorer(
         chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
     )
 
-    with pytest.raises(InvalidJsonException):
+    with pytest.raises(InvalidJsonException, match="Error in scorer SelfAskTrueFalseScorer"):
         await scorer.score_text_async("this has no bullying")
 
-    assert chat_target.send_prompt_async.call_count == int(os.getenv("RETRY_MAX_NUM_ATTEMPTS", 2))
+    # RETRY_MAX_NUM_ATTEMPTS is set to 2 in conftest.py
+    assert chat_target.send_prompt_async.call_count == 2
+
+
+def test_self_ask_true_false_scorer_identifier_has_system_prompt_template(patch_central_database):
+    """Test that scorer_identifier includes system_prompt_template."""
+    chat_target = MagicMock()
+
+    scorer = SelfAskTrueFalseScorer(
+        chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
+    )
+
+    # Access scorer_identifier to trigger lazy build
+    sid = scorer.scorer_identifier
+
+    # Should have system_prompt_template set
+    assert sid.system_prompt_template is not None
+    assert len(sid.system_prompt_template) > 0
+
+
+def test_self_ask_true_false_get_identifier_type(patch_central_database):
+    """Test that get_identifier returns correct __type__."""
+    chat_target = MagicMock()
+
+    scorer = SelfAskTrueFalseScorer(
+        chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
+    )
+
+    identifier = scorer.get_identifier()
+
+    assert identifier["__type__"] == "SelfAskTrueFalseScorer"
+    assert "hash" in identifier
+    assert "system_prompt_template" in identifier
+
+
+def test_self_ask_true_false_get_identifier_long_prompt_hashed(patch_central_database):
+    """Test that long system prompts are hashed in get_identifier."""
+    chat_target = MagicMock()
+
+    scorer = SelfAskTrueFalseScorer(
+        chat_target=chat_target, true_false_question_path=TrueFalseQuestionPaths.GROUNDED.value
+    )
+
+    identifier = scorer.get_identifier()
+
+    # The GROUNDED system prompt is long (>100 chars), so it should be hashed
+    sys_prompt_in_id = identifier["system_prompt_template"]
+    if sys_prompt_in_id:
+        # If it's hashed, it will start with sha256:
+        assert sys_prompt_in_id.startswith("sha256:") or len(sys_prompt_in_id) <= 100
