@@ -3,7 +3,6 @@
 
 import logging
 import random
-import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -63,7 +62,6 @@ async def fetch_ml_vlsu_dataset_async(
     Raises:
         ValueError: If any of the specified categories are invalid.
     """
-
     if categories:
         invalid = set(categories) - set(ML_VLSU_CATEGORIES)
         if invalid:
@@ -144,7 +142,7 @@ async def _fetch_and_save_image_async(image_url: str, group_id: str) -> str:
     except Exception as e:
         logger.warning(f"Failed to check whether image already exists: {e}")
 
-    # Add browser-like headers and better error handling
+    # Add browser-like headers for better error handling
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",

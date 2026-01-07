@@ -63,7 +63,7 @@ __all__ = [
     "fetch_sorry_bench_dataset",
     "fetch_tdc23_redteaming_dataset",
     "fetch_transphobia_awareness_dataset",
-    "fetch_vlsu_multimodal_dataset_async",
+    "fetch_ml_vlsu_dataset_async",
     "fetch_wmdp_dataset",
     "fetch_xstest_dataset",
     "TextJailBreak",
