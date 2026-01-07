@@ -28,6 +28,7 @@ from pyrit.datasets.xstest_dataset import fetch_xstest_dataset
 from pyrit.datasets.equitymedqa_dataset import fetch_equitymedqa_dataset_unique_values
 from pyrit.datasets.text_jailbreak import TextJailBreak
 from pyrit.datasets.transphobia_awareness_dataset import fetch_transphobia_awareness_dataset
+from pyrit.datasets.vlsu_multimodal_dataset import fetch_ml_vlsu_dataset_async
 from pyrit.datasets.ccp_sensitive_prompts_dataset import fetch_ccp_sensitive_prompts_dataset
 from pyrit.datasets.fetch_jbb_behaviors import (
     fetch_jbb_behaviors_dataset,
@@ -62,6 +63,7 @@ __all__ = [
     "fetch_sorry_bench_dataset",
     "fetch_tdc23_redteaming_dataset",
     "fetch_transphobia_awareness_dataset",
+    "fetch_vlsu_multimodal_dataset_async",
     "fetch_wmdp_dataset",
     "fetch_xstest_dataset",
     "TextJailBreak",
