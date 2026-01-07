@@ -106,6 +106,7 @@ async def make_request_and_raise_if_error_async(
             data=request_body if request_body and post_type != "json" and not files else None,
             files=files if files else None,
             headers=headers,
+            follow_redirects=True,  # ensure redirects from http to https are followed
         )
 
         response.raise_for_status()  # This will automatically raise an exception for 4xx and 5xx responses
