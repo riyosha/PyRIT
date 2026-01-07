@@ -30,6 +30,7 @@ from pyrit.datasets import (
     fetch_sosbench_dataset,
     fetch_tdc23_redteaming_dataset,
     fetch_transphobia_awareness_dataset,
+    fetch_ml_vlsu_dataset_async,
     fetch_wmdp_dataset,
     fetch_xstest_dataset,
 )
@@ -69,25 +70,37 @@ from pyrit.models import SeedDataset
 def test_fetch_datasets(fetch_function, is_seed_dataset):
     data = fetch_function()
 
-    assert data is not None
+    assert data is not None, f"{fetch_function.__name__} returned None"
     if is_seed_dataset:
-        assert isinstance(data, SeedDataset)
-        assert len(data.prompts) > 0
+        assert isinstance(data, SeedDataset), f"{fetch_function.__name__} did not return a SeedDataset"
+        assert len(data.prompts) > 0, f"{fetch_function.__name__} returned no prompts"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "fetch_function, number_of_prompts",
+    "fetch_function, number_of_prompts, limit, random_sample, random_seed",
     [
-        (fetch_harmbench_multimodal_dataset_async, 110 * 2),
+        (fetch_harmbench_multimodal_dataset_async, 110 * 2, None, False, None),
+        (fetch_ml_vlsu_dataset_async, 100 * 2, 100, True, 42),
     ],
 )
-async def test_fetch_multimodal_datasets(fetch_function, number_of_prompts):
-    data = await fetch_function()
+async def test_fetch_multimodal_datasets(fetch_function, number_of_prompts, limit, random_sample, random_seed):
+    if limit:
+        data = await fetch_function(limit=limit, random_sample=random_sample, random_seed=random_seed)
+    else:
+        data = await fetch_function()
 
-    assert data is not None
-    assert isinstance(data, SeedDataset)
-    assert len(data.prompts) == number_of_prompts
+    assert data is not None, f"{fetch_function.__name__} returned None"
+    assert isinstance(data, SeedDataset), f"{fetch_function.__name__} did not return a SeedDataset"
+    # For VLSU, allow for fewer prompts due to failed image downloads (faulty URLs in the dataset itself)
+    if fetch_function == fetch_ml_vlsu_dataset_async:
+        assert len(data.prompts) > 0, "No prompts created"  # ensure non zero prompts
+        assert (
+            len(data.prompts) <= number_of_prompts
+        ), f"VLSU: expected at most {number_of_prompts} prompts, got {len(data.prompts)}"
+    else:
+        # For other multimodal datasets, expect exact number of prompts
+        assert len(data.prompts) == number_of_prompts, f"Expected {number_of_prompts} prompts, got {len(data.prompts)}"
 
 
 @pytest.mark.integration
