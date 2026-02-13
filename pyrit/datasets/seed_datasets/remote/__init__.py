@@ -43,6 +43,9 @@ from pyrit.datasets.seed_datasets.remote.librai_do_not_answer_dataset import (
 from pyrit.datasets.seed_datasets.remote.llm_latent_adversarial_training_dataset import (  # noqa: F401
     _LLMLatentAdversarialTrainingDataset,
 )
+from pyrit.datasets.seed_datasets.remote.malicious_educator_hcot_dataset import (
+    _MaliciousEducatorHCoTDataset,
+)  # noqa: F401
 from pyrit.datasets.seed_datasets.remote.medsafetybench_dataset import (
     _MedSafetyBenchDataset,
 )  # noqa: F401

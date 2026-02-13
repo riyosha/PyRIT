@@ -29,9 +29,6 @@ class _AegisContentSafetyDataset(_RemoteDatasetLoader):
     split into 30,007 training samples, 1,445 validation samples, and 1,964 test samples.
     The dataset covers 12 top-level hazard categories with an extension to 9 fine-grained
     subcategories.
-
-    Warning: This dataset contains unsafe and potentially harmful content. Consult your
-    legal department before using these prompts for testing.
     """
 
     HARM_CATEGORIES = [
@@ -107,13 +104,17 @@ class _AegisContentSafetyDataset(_RemoteDatasetLoader):
 
         # Validate harm categories if provided
         if harm_categories:
-            invalid_categories = {cat for cat in harm_categories if cat not in self.HARM_CATEGORIES}
+            invalid_categories = {
+                cat for cat in harm_categories if cat not in self.HARM_CATEGORIES
+            }
             if invalid_categories:
                 raise ValueError(
                     f"Invalid harm categories: {invalid_categories}. Valid categories are: {self.HARM_CATEGORIES}"
                 )
 
-        self.source = "https://huggingface.co/datasets/nvidia/Aegis-AI-Content-Safety-Dataset-2.0"
+        self.source = (
+            "https://huggingface.co/datasets/nvidia/Aegis-AI-Content-Safety-Dataset-2.0"
+        )
 
     @property
     def dataset_name(self) -> str:
@@ -157,13 +158,18 @@ class _AegisContentSafetyDataset(_RemoteDatasetLoader):
                 prompt_harm_categories = []
                 if violated_categories:
                     # The violated_categories field contains comma-separated category names
-                    categories = [cat.strip() for cat in violated_categories.split(",") if cat.strip()]
+                    categories = [
+                        cat.strip()
+                        for cat in violated_categories.split(",")
+                        if cat.strip()
+                    ]
                     prompt_harm_categories = categories
 
                 # Filter by harm_categories if specified
                 if self.harm_categories_filter is not None:
                     if not prompt_harm_categories or not any(
-                        cat in prompt_harm_categories for cat in self.harm_categories_filter
+                        cat in prompt_harm_categories
+                        for cat in self.harm_categories_filter
                     ):
                         continue
 
@@ -176,7 +182,9 @@ class _AegisContentSafetyDataset(_RemoteDatasetLoader):
                         value=prompt_value,
                         data_type="text",
                         dataset_name=self.dataset_name,
-                        harm_categories=prompt_harm_categories if prompt_harm_categories else None,
+                        harm_categories=(
+                            prompt_harm_categories if prompt_harm_categories else None
+                        ),
                         source=self.source,
                     )
                 )
