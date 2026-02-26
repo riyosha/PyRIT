@@ -720,7 +720,7 @@ class OpenAIResponseTarget(OpenAITarget, PromptChatTarget):
                     continue
                 if isinstance(section, dict) and section.get("type") == "function_call":
                     # Do NOT skip function_call even if status == "completed" — we still need to emit the output.
-                    return cast(dict[str, Any], section)
+                    return cast("dict[str, Any]", section)
         return None
 
     async def _execute_call_section(self, tool_call_section: dict[str, Any]) -> dict[str, Any]:
